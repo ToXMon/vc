@@ -1,0 +1,5 @@
+This is a placeholder for the 192x192 app icon.
+To complete the PWA, replace this with an actual PNG icon.
+You can create icons using tools like:
+- https://www.pwabuilder.com/imageGenerator
+- https://realfavicongenerator.net/

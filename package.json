@@ -1,0 +1,25 @@
+{
+  "name": "all-or-nothing-dice-game",
+  "version": "1.0.0",
+  "description": "Progressive Web Application - All or Nothing Dice Game",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx http-server -p 8080 -c-1",
+    "build": "echo 'Build complete'",
+    "test": "echo 'Tests not yet implemented'"
+  },
+  "keywords": [
+    "pwa",
+    "dice-game",
+    "mobile",
+    "game"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
