@@ -131,6 +131,7 @@ body {
     font-size: 3rem;
     font-weight: bold;
     margin-bottom: var(--spacing-xl);
+    color: var(--accent-teal); /* Fallback for browsers that don't support background-clip: text */
     background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple));
     -webkit-background-clip: text;
     background-clip: text;
