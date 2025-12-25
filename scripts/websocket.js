@@ -40,7 +40,12 @@ class WebSocketManager {
                 
                 this.ws.onerror = (error) => {
                     console.error('WebSocket error:', error);
-                    reject(error);
+                    // Fall back to simulation mode on connection error
+                    this.simulateMode = true;
+                    this.isConnected = true;
+                    this.playerId = this.generateId();
+                    console.log('Falling back to simulation mode');
+                    resolve();
                 };
                 
                 this.ws.onclose = () => {
@@ -59,9 +64,10 @@ class WebSocketManager {
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
             console.log(`Reconnecting... Attempt ${this.reconnectAttempts}`);
+            const delay = Math.min(2000 * this.reconnectAttempts, 30000);
             setTimeout(() => {
                 this.connect(serverUrl);
-            }, 2000 * this.reconnectAttempts);
+            }, delay);
         } else {
             console.error('Max reconnection attempts reached');
             this.trigger('connectionFailed');
@@ -166,11 +172,16 @@ class WebSocketManager {
     }
     
     generateId() {
-        return 'player_' + Math.random().toString(36).substr(2, 9);
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return 'player_' + crypto.randomUUID();
+        }
+        // Fallback for environments without crypto.randomUUID
+        return 'player_' + Math.random().toString(36).slice(2, 11);
     }
     
     generateRoomCode() {
-        return Math.random().toString(36).substr(2, 6).toUpperCase();
+        // Generate a 6-character alphanumeric room code
+        return Math.random().toString(36).slice(2, 8).toUpperCase();
     }
     
     generateMockPlayers() {

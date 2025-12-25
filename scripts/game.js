@@ -171,7 +171,15 @@ class AllOrNothingGame {
     }
     
     showSettings() {
-        alert('Settings coming soon! Sound: ' + (this.sounds.enabled ? 'On' : 'Off'));
+        // TODO: Create a proper settings screen in the HTML
+        // For now, use a simple modal approach
+        this.showConfirmationDialog(
+            `Sound is currently ${this.sounds.enabled ? 'ON' : 'OFF'}. Toggle sound?`,
+            () => {
+                this.sounds.enabled = !this.sounds.enabled;
+                console.log('Sound toggled:', this.sounds.enabled);
+            }
+        );
     }
     
     // Lobby Actions
@@ -182,10 +190,24 @@ class AllOrNothingGame {
     
     startGameFromLobby() {
         const playerName = document.getElementById('player-name').value.trim() || 'Player';
-        const roomCode = document.getElementById('room-code').value.trim();
+        const roomCodeInput = document.getElementById('room-code');
+        const normalizedRoomCode = roomCodeInput.value.trim().toUpperCase();
         
-        if (!roomCode) {
-            alert('Please enter or generate a room code');
+        // Normalize input so the displayed value matches what we validate/send
+        roomCodeInput.value = normalizedRoomCode;
+        
+        if (!normalizedRoomCode) {
+            this.showConfirmationDialog('Please enter or generate a room code', () => {});
+            return;
+        }
+        
+        // Client-side validation: 6 alphanumeric characters (A-Z, 0-9)
+        const roomCodePattern = /^[A-Z0-9]{6}$/;
+        if (!roomCodePattern.test(normalizedRoomCode)) {
+            this.showConfirmationDialog(
+                'Invalid room code format. Please enter a 6-character code using letters and numbers only.',
+                () => {}
+            );
             return;
         }
         
@@ -267,22 +289,48 @@ class AllOrNothingGame {
         if (!playerArea) return;
         
         const chipContainer = playerArea.querySelector('.chip-container');
-        chipContainer.innerHTML = '';
         
-        // Create chip rows
+        // Incrementally update chip rows instead of clearing and rebuilding
         const chipTypes = ['green', 'red', 'heart'];
+        
         chipTypes.forEach(type => {
-            if (player.chips[type].length > 0) {
-                const row = document.createElement('div');
+            const desiredCount = player.chips[type] ? player.chips[type].length : 0;
+            
+            // Find existing row for this chip type
+            let row = chipContainer.querySelector(`.chip-row[data-type="${type}"]`);
+            
+            if (desiredCount === 0) {
+                // Remove existing row if no chips of this type are needed
+                if (row && row.parentNode === chipContainer) {
+                    chipContainer.removeChild(row);
+                }
+                return;
+            }
+            
+            // Create row if it does not exist yet
+            if (!row) {
+                row = document.createElement('div');
                 row.className = 'chip-row';
-                
-                player.chips[type].forEach(() => {
-                    const chip = document.createElement('span');
-                    chip.className = `chip ${type} active`;
-                    row.appendChild(chip);
-                });
-                
+                row.setAttribute('data-type', type);
                 chipContainer.appendChild(row);
+            }
+            
+            const currentChips = row.querySelectorAll('.chip').length;
+            
+            // Add missing chips
+            if (currentChips < desiredCount) {
+                const toAdd = desiredCount - currentChips;
+                for (let i = 0; i < toAdd; i++) {
+                    const chip = document.createElement('span');
+                    chip.className = `chip ${type} active chip-collect-animation`;
+                    row.appendChild(chip);
+                }
+            } else if (currentChips > desiredCount) {
+                // Remove extra chips if somehow there are more than needed
+                const toRemove = currentChips - desiredCount;
+                for (let i = 0; i < toRemove; i++) {
+                    row.removeChild(row.lastChild);
+                }
             }
         });
     }
@@ -299,7 +347,7 @@ class AllOrNothingGame {
         setTimeout(() => {
             this.processDiceResults(results);
             this.nextTurn();
-        }, 2500);
+        }, 2000); // Match the dice animation duration
     }
     
     processDiceResults(results) {
@@ -403,9 +451,12 @@ class AllOrNothingGame {
     }
     
     pauseGame() {
-        if (confirm('Return to main menu? Game progress will be lost.')) {
-            this.exitToMenu();
-        }
+        this.showConfirmationDialog(
+            'Return to main menu? Game progress will be lost.',
+            () => {
+                this.exitToMenu();
+            }
+        );
     }
     
     endGame(winnerIndex) {
@@ -462,6 +513,85 @@ class AllOrNothingGame {
         messageDiv.innerHTML = `<span class="sender">${sender}:</span> ${message}`;
         messagesContainer.appendChild(messageDiv);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+    
+    /**
+     * Show a non-blocking confirmation dialog consistent with the game's UI.
+     * @param {string} message - Message to display to the user.
+     * @param {Function} onConfirm - Callback when user confirms.
+     * @param {Function} [onCancel] - Optional callback when user cancels.
+     */
+    showConfirmationDialog(message, onConfirm, onCancel) {
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = '9999';
+
+        // Create modal container
+        const modal = document.createElement('div');
+        modal.style.backgroundColor = 'var(--secondary-dark)';
+        modal.style.color = 'var(--text-light)';
+        modal.style.padding = '2rem';
+        modal.style.borderRadius = 'var(--radius-lg)';
+        modal.style.boxShadow = 'var(--shadow-lg)';
+        modal.style.maxWidth = '90%';
+        modal.style.textAlign = 'center';
+
+        const textEl = document.createElement('p');
+        textEl.textContent = message;
+        textEl.style.marginBottom = '1.5rem';
+        textEl.style.fontSize = '1.1rem';
+        modal.appendChild(textEl);
+
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '1rem';
+        buttonContainer.style.justifyContent = 'center';
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.textContent = 'OK';
+        confirmBtn.className = 'btn-primary';
+        confirmBtn.style.padding = '0.75rem 1.5rem';
+        confirmBtn.style.cursor = 'pointer';
+
+        const removeDialog = () => {
+            document.body.removeChild(overlay);
+        };
+
+        confirmBtn.onclick = () => {
+            removeDialog();
+            if (onConfirm) onConfirm();
+        };
+
+        buttonContainer.appendChild(confirmBtn);
+
+        // Add cancel button if callback provided
+        if (onCancel) {
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.className = 'btn-secondary';
+            cancelBtn.style.padding = '0.75rem 1.5rem';
+            cancelBtn.style.cursor = 'pointer';
+
+            cancelBtn.onclick = () => {
+                removeDialog();
+                onCancel();
+            };
+
+            buttonContainer.appendChild(cancelBtn);
+        }
+
+        modal.appendChild(buttonContainer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
     }
     
     // Audio Functions

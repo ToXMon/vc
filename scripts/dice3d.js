@@ -7,6 +7,8 @@ class Dice3D {
         this.renderer = null;
         this.dice = [];
         this.isRolling = false;
+        this.animationFrameId = null;
+        this.resizeHandler = null;
         
         this.init();
     }
@@ -41,8 +43,9 @@ class Dice3D {
         // Start animation loop
         this.animate();
         
-        // Handle window resize
-        window.addEventListener('resize', () => this.onWindowResize());
+        // Handle window resize with stored reference for cleanup
+        this.resizeHandler = () => this.onWindowResize();
+        window.addEventListener('resize', this.resizeHandler);
     }
     
     addLights() {
@@ -168,19 +171,19 @@ class Dice3D {
         const results = [];
         
         this.dice.forEach((die, index) => {
-            // Random rotation
-            const rotations = {
-                x: Math.random() * Math.PI * 4 + Math.PI * 2,
-                y: Math.random() * Math.PI * 4 + Math.PI * 2,
-                z: Math.random() * Math.PI * 4 + Math.PI * 2
-            };
-            
-            // Animate dice
-            this.animateDie(die, rotations, index);
-            
             // Generate random result (1-6)
             const result = Math.floor(Math.random() * 6) + 1;
             results.push(result);
+            
+            // Calculate rotation to show the correct face
+            const targetRotations = this.getRotationForFace(result);
+            
+            // Add some random spinning for visual effect
+            targetRotations.x += Math.PI * 4;
+            targetRotations.y += Math.PI * 4;
+            
+            // Animate dice
+            this.animateDie(die, targetRotations, index);
         });
         
         // After animation, resolve with results
@@ -189,6 +192,20 @@ class Dice3D {
         }, 2000);
         
         return results;
+    }
+    
+    getRotationForFace(face) {
+        // Return rotation that will show the specified face on top
+        // Face mapping for Three.js BoxGeometry with 6 materials [right, left, top, bottom, front, back]
+        const rotations = {
+            1: { x: 0, y: 0, z: 0 },                    // Front face
+            2: { x: 0, y: Math.PI / 2, z: 0 },          // Right face
+            3: { x: -Math.PI / 2, y: 0, z: 0 },         // Top face
+            4: { x: Math.PI / 2, y: 0, z: 0 },          // Bottom face
+            5: { x: 0, y: -Math.PI / 2, z: 0 },         // Left face
+            6: { x: 0, y: Math.PI, z: 0 }               // Back face
+        };
+        return { ...rotations[face] };
     }
     
     animateDie(die, targetRotations, index) {
@@ -233,7 +250,7 @@ class Dice3D {
     }
     
     animate() {
-        requestAnimationFrame(() => this.animate());
+        this.animationFrameId = requestAnimationFrame(() => this.animate());
         
         // Gentle rotation when not rolling
         if (!this.isRolling) {
@@ -252,6 +269,29 @@ class Dice3D {
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(width, height);
+    }
+    
+    destroy() {
+        // Cleanup method to prevent memory leaks
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+        
+        if (this.resizeHandler) {
+            window.removeEventListener('resize', this.resizeHandler);
+            this.resizeHandler = null;
+        }
+        
+        if (this.renderer) {
+            this.renderer.dispose();
+        }
+        
+        // Cleanup Three.js objects
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
+        this.dice = [];
     }
     
     reset() {
