@@ -591,7 +591,7 @@ body {
 /* Game Status */
 .game-status {
     position: fixed;
-    bottom: 20px;
+    top: 80px;
     left: 50%;
     transform: translateX(-50%);
     background: var(--accent-blue);
@@ -599,6 +599,7 @@ body {
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
     z-index: 50;
+    pointer-events: none;
 }
 
 #status-message {

@@ -6,6 +6,7 @@ const urlsToCache = [
   '/scripts/game.js',
   '/scripts/dice3d.js',
   '/scripts/websocket.js',
+  '/scripts/lib/three.min.js',
   '/manifest.json'
 ];
 
