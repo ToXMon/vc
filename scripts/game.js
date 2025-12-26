@@ -26,11 +26,39 @@ class AllOrNothingGame {
         this.setupEventListeners();
         this.setupWebSocketHandlers();
         
+        // Check for room code in URL
+        this.checkURLParameters();
+        
         // Hide loading screen and show main menu
         setTimeout(() => {
             this.hideLoading();
-            this.showScreen('main-menu');
+            // If there's a room code in URL, go straight to lobby
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomCode = urlParams.get('room');
+            if (roomCode && roomCode.length === 6) {
+                this.showScreen('lobby-screen');
+                document.getElementById('room-code').value = roomCode.toUpperCase();
+            } else {
+                this.showScreen('main-menu');
+            }
         }, 1500);
+    }
+    
+    checkURLParameters() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomCode = urlParams.get('room');
+        if (roomCode && roomCode.length === 6) {
+            // Valid room code found in URL
+            console.log('Room code from URL:', roomCode);
+        }
+    }
+    
+    updateURL(roomCode) {
+        if (roomCode) {
+            const url = new URL(window.location);
+            url.searchParams.set('room', roomCode);
+            window.history.pushState({}, '', url);
+        }
     }
     
     setupEventListeners() {
@@ -54,6 +82,10 @@ class AllOrNothingGame {
         // Lobby
         document.getElementById('btn-generate-code').addEventListener('click', () => {
             this.generateRoomCode();
+        });
+        
+        document.getElementById('btn-copy-link').addEventListener('click', () => {
+            this.copyRoomLink();
         });
         
         document.getElementById('btn-start-game').addEventListener('click', () => {
@@ -188,6 +220,33 @@ class AllOrNothingGame {
         this.wsManager.createRoom(playerName);
     }
     
+    copyRoomLink() {
+        const roomCode = document.getElementById('room-code').value.trim();
+        if (!roomCode) {
+            this.showConfirmationDialog('Please generate a room code first', () => {});
+            return;
+        }
+        
+        const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+        
+        // Copy to clipboard
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                this.showConfirmationDialog('Room link copied! Share it with your cofounder.', () => {});
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                this.showShareDialog(shareUrl);
+            });
+        } else {
+            this.showShareDialog(shareUrl);
+        }
+    }
+    
+    showShareDialog(shareUrl) {
+        const message = `Share this link with your cofounder:\n\n${shareUrl}`;
+        this.showConfirmationDialog(message, () => {});
+    }
+    
     startGameFromLobby() {
         const playerName = document.getElementById('player-name').value.trim() || 'Player';
         const roomCodeInput = document.getElementById('room-code');
@@ -247,16 +306,15 @@ class AllOrNothingGame {
             isActive: true
         });
         
-        // Add AI/placeholder players
-        const playerNames = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve'];
-        for (let i = 0; i < 5; i++) {
-            this.players.push({
-                id: `ai_${i}`,
-                name: playerNames[i],
-                chips: { green: [], red: [], heart: [] },
-                isActive: false
-            });
-        }
+        // For 2-player mode, add one opponent
+        // In simulation mode, add AI placeholder
+        // When real multiplayer is connected, this will be replaced by actual player
+        this.players.push({
+            id: 'player_2',
+            name: 'Opponent',
+            chips: { green: [], red: [], heart: [] },
+            isActive: true
+        });
         
         // Update UI
         this.updatePlayerAreas();

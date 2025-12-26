@@ -138,14 +138,26 @@ class WebSocketManager {
                 case 'createRoom':
                     this.roomCode = this.generateRoomCode();
                     this.trigger('roomCreated', { roomCode: this.roomCode });
+                    // Update URL with room code
+                    if (typeof window !== 'undefined') {
+                        const url = new URL(window.location);
+                        url.searchParams.set('room', this.roomCode);
+                        window.history.pushState({}, '', url);
+                    }
                     break;
                     
                 case 'joinRoom':
                     this.roomCode = data.roomCode;
                     this.trigger('roomJoined', { 
                         roomCode: this.roomCode,
-                        players: this.generateMockPlayers()
+                        players: this.generateMockPlayers(data.playerName)
                     });
+                    // Update URL with room code
+                    if (typeof window !== 'undefined') {
+                        const url = new URL(window.location);
+                        url.searchParams.set('room', this.roomCode);
+                        window.history.pushState({}, '', url);
+                    }
                     break;
                     
                 case 'chat':
@@ -184,10 +196,14 @@ class WebSocketManager {
         return Math.random().toString(36).slice(2, 8).toUpperCase();
     }
     
-    generateMockPlayers() {
-        return [
-            { id: this.playerId, name: this.playerName, ready: true }
+    generateMockPlayers(playerName) {
+        const players = [
+            { id: this.playerId, name: playerName || this.playerName, ready: true }
         ];
+        
+        // In simulation mode for 2-player, show that room is ready for opponent
+        // When real WebSocket is connected, this will show actual players
+        return players;
     }
     
     // Room Management

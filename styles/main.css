@@ -227,6 +227,29 @@ body {
     width: 100%;
 }
 
+.room-buttons {
+    display: flex;
+    gap: var(--spacing-xs);
+}
+
+.room-buttons button {
+    flex: 1;
+}
+
+.lobby-info {
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm);
+    background: rgba(11, 166, 166, 0.1);
+    border-left: 3px solid var(--accent-teal);
+    border-radius: var(--radius-sm);
+}
+
+.info-text {
+    color: var(--text-gray);
+    font-size: 0.9rem;
+    margin: 0;
+}
+
 .lobby-players {
     margin: var(--spacing-lg) 0;
     padding: var(--spacing-md);
