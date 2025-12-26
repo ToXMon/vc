@@ -136,6 +136,7 @@ class AllOrNothingGame {
     }
     
     setupWebSocketHandlers() {
+        // Room events
         this.wsManager.on('roomCreated', (data) => {
             document.getElementById('room-code').value = data.roomCode;
             document.getElementById('current-room-code').textContent = `Room: ${data.roomCode}`;
@@ -147,16 +148,61 @@ class AllOrNothingGame {
             this.updatePlayerList(data.players);
         });
         
-        this.wsManager.on('chatMessage', (data) => {
-            this.addChatMessage(data.playerName, data.message);
+        // Peer connection events
+        this.wsManager.on('peerConnected', (data) => {
+            console.log('Peer connected:', data.peerId);
+            this.showNotification('Player connected!');
         });
         
-        this.wsManager.on('diceRolled', (data) => {
-            this.handleDiceRoll(data);
+        this.wsManager.on('peerDisconnected', (data) => {
+            console.log('Peer disconnected');
+            this.showNotification('Player disconnected');
         });
         
-        this.wsManager.on('gameUpdate', (data) => {
+        // Player joined the room
+        this.wsManager.on('playerJoined', (data, fullMessage) => {
+            console.log('Player joined:', data);
+            const newPlayer = {
+                id: fullMessage.playerId,
+                name: fullMessage.playerName,
+                ready: true
+            };
+            
+            // Add to player list if not already there
+            if (!this.players.find(p => p.id === newPlayer.id)) {
+                if (this.players.length < 2) {
+                    this.players.push({
+                        id: newPlayer.id,
+                        name: newPlayer.name,
+                        chips: { green: [], red: [], heart: [] },
+                        isActive: true
+                    });
+                }
+            }
+            
+            this.updatePlayerList(this.players.map(p => ({ id: p.id, name: p.name, ready: true })));
+            this.updatePlayerAreas();
+            this.showNotification(`${newPlayer.name} joined the game!`);
+        });
+        
+        // Chat messages
+        this.wsManager.on('chat', (data, fullMessage) => {
+            this.addChatMessage(fullMessage.playerName || 'Player', data.message);
+        });
+        
+        // Dice roll from other player
+        this.wsManager.on('rollDice', (data, fullMessage) => {
+            console.log('Received dice roll from peer:', data);
+            this.handleRemoteDiceRoll(data.results, fullMessage.playerId);
+        });
+        
+        // Game state updates
+        this.wsManager.on('gameAction', (data) => {
             this.updateGameState(data);
+        });
+        
+        this.wsManager.on('playerState', (data, fullMessage) => {
+            this.handleRemotePlayerState(data, fullMessage.playerId);
         });
     }
     
@@ -250,24 +296,26 @@ class AllOrNothingGame {
     startGameFromLobby() {
         const playerName = document.getElementById('player-name').value.trim() || 'Player';
         const roomCodeInput = document.getElementById('room-code');
-        const normalizedRoomCode = roomCodeInput.value.trim().toUpperCase();
+        const roomCode = roomCodeInput.value.trim();
         
-        // Normalize input so the displayed value matches what we validate/send
-        roomCodeInput.value = normalizedRoomCode;
+        if (!playerName) {
+            this.showConfirmationDialog('Please enter your name', () => {});
+            return;
+        }
         
-        if (!normalizedRoomCode) {
+        if (!roomCode) {
             this.showConfirmationDialog('Please enter or generate a room code', () => {});
             return;
         }
         
-        // Client-side validation: 6 alphanumeric characters (A-Z, 0-9)
-        const roomCodePattern = /^[A-Z0-9]{6}$/;
-        if (!roomCodePattern.test(normalizedRoomCode)) {
-            this.showConfirmationDialog(
-                'Invalid room code format. Please enter a 6-character code using letters and numbers only.',
-                () => {}
-            );
-            return;
+        // Check if this is a new room (we're the host) or joining existing
+        if (roomCode.length === 6 && roomCode === this.wsManager.roomCode) {
+            // This is our room - we're the host, just start
+            console.log('Starting game as host');
+        } else {
+            // Joining another room - connect to peer
+            console.log('Joining room:', roomCode);
+            this.wsManager.joinRoom(roomCode, playerName);
         }
         
         // Initialize players
@@ -402,10 +450,60 @@ class AllOrNothingGame {
         
         const results = this.dice3D.rollDice();
         
+        // Send dice results to peer
+        this.wsManager.rollDice(results);
+        
         setTimeout(() => {
             this.processDiceResults(results);
             this.nextTurn();
         }, 2000); // Match the dice animation duration
+    }
+    
+    handleRemoteDiceRoll(results, playerId) {
+        // Handle dice roll from the other player
+        console.log('Remote player rolled:', results);
+        
+        if (this.dice3D) {
+            // Optionally animate the dice for the remote player
+            this.dice3D.rollDice();
+        }
+        
+        // Find the player and update their chips
+        const playerIndex = this.players.findIndex(p => p.id === playerId);
+        if (playerIndex !== -1) {
+            this.processDiceResultsForPlayer(results, playerIndex);
+            // Don't call nextTurn here - the remote player will handle their turn
+        }
+    }
+    
+    processDiceResultsForPlayer(results, playerIndex) {
+        if (!results) return;
+        
+        console.log('Processing dice results for player', playerIndex, ':', results);
+        
+        const player = this.players[playerIndex];
+        if (!player) return;
+        
+        const allSame = results[0] === results[1] && results[1] === results[2];
+        const twoSame = results[0] === results[1] || results[1] === results[2] || results[0] === results[2];
+        
+        if (allSame) {
+            player.chips.green.push(results[0]);
+            this.playSound('audio-chip-collect');
+        } else if (twoSame) {
+            player.chips.red.push(1);
+            this.playSound('audio-chip-collect');
+        } else {
+            player.chips.heart.push(1);
+            this.playSound('audio-chip-collect');
+        }
+        
+        this.updatePlayerChips(playerIndex);
+        
+        // Check for winner
+        if (player.chips.green.length >= 3) {
+            this.endGame(playerIndex);
+        }
     }
     
     processDiceResults(results) {
@@ -559,7 +657,12 @@ class AllOrNothingGame {
         const message = input.value.trim();
         
         if (message) {
+            // Send to peer
             this.wsManager.sendChatMessage(message);
+            
+            // Also show locally
+            this.addChatMessage('You', message);
+            
             input.value = '';
         }
     }
@@ -568,9 +671,20 @@ class AllOrNothingGame {
         const messagesContainer = document.getElementById('chat-messages');
         const messageDiv = document.createElement('div');
         messageDiv.className = 'chat-message';
-        messageDiv.innerHTML = `<span class="sender">${sender}:</span> ${message}`;
+        
+        // Sanitize message to prevent XSS
+        const sanitizedMessage = this.sanitizeHTML(message);
+        const sanitizedSender = this.sanitizeHTML(sender);
+        
+        messageDiv.innerHTML = `<span class="sender">${sanitizedSender}:</span> ${sanitizedMessage}`;
         messagesContainer.appendChild(messageDiv);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+    
+    sanitizeHTML(str) {
+        const temp = document.createElement('div');
+        temp.textContent = str;
+        return temp.innerHTML;
     }
     
     /**
@@ -707,6 +821,44 @@ class AllOrNothingGame {
     
     updateGameState(data) {
         console.log('Game state updated:', data);
+    }
+    
+    handleRemotePlayerState(data, playerId) {
+        // Update the remote player's state (chips, score, etc.)
+        const playerIndex = this.players.findIndex(p => p.id === playerId);
+        if (playerIndex !== -1 && data) {
+            this.players[playerIndex] = { ...this.players[playerIndex], ...data };
+            this.updatePlayerChips(playerIndex);
+        }
+    }
+    
+    showNotification(message) {
+        // Simple notification system
+        const notification = document.createElement('div');
+        notification.className = 'notification';
+        notification.textContent = message;
+        notification.style.cssText = `
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(11, 166, 166, 0.95);
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+            z-index: 10000;
+            animation: slideDown 0.3s ease;
+        `;
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideUp 0.3s ease';
+            setTimeout(() => {
+                document.body.removeChild(notification);
+            }, 300);
+        }, 3000);
     }
 }
 

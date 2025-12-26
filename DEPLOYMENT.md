@@ -1,5 +1,9 @@
 # Quick Deployment Guide - All or Nothing PWA
 
+## 🎮 Real Multiplayer with PeerJS!
+
+Your app now features **true peer-to-peer multiplayer** using PeerJS. No backend server needed - just deploy statically and play in real-time!
+
 ## Tonight's Deployment Steps
 
 ### Option 1: GitHub Pages (Easiest - 2 minutes)
@@ -60,10 +64,12 @@ Test the room creation:
 
 ## Important Notes
 
-- **URLs with Room Codes**: The app now adds `?room=ABCD12` to URLs automatically
+- **Real Multiplayer**: Uses PeerJS for peer-to-peer connections (no server needed!)
+- **Chat Works**: Real-time chat between players
+- **Dice Rolls Sync**: Both players see each other's rolls in real-time
+- **URLs with Room Codes**: The app adds `?room=PEER_ID` to URLs automatically
 - **Direct Links**: Anyone with the link can join the room
-- **Room Codes**: Always 6 characters (letters and numbers)
-- **No Server Needed**: The app works as a PWA (Progressive Web App)
+- **Free Forever**: PeerJS cloud server is free - no backend costs!
 
 ## Post-Deployment
 
