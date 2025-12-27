@@ -784,6 +784,26 @@ body {
         font-size: 1rem;
         padding: var(--spacing-sm) var(--spacing-md);
     }
+    
+    /* Mobile: ensure roll button is above chat */
+    #btn-roll-dice {
+        position: relative;
+        z-index: 101;
+    }
+    
+    /* Mobile: adjust chat panel height and positioning */
+    .chat-panel {
+        max-width: 100%;
+        width: 100%;
+        bottom: 0;
+        right: 0;
+        height: 250px;
+        max-height: 50vh;
+    }
+    
+    .chat-panel.collapsed {
+        height: 50px;
+    }
 }
 
 /* ===== Animations ===== */
