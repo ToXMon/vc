@@ -806,6 +806,20 @@ body {
     }
 }
 
+/* Adjust the position of the Roll Dice button */
+#btn-roll-dice {
+  position: absolute;
+  bottom: 20px;
+  right: 50%;
+  transform: translateX(50%);
+  z-index: 10;
+}
+
+/* Ensure the chat modal is not obstructed */
+#chat-modal {
+  margin-bottom: 80px; /* Space for the Roll Dice button */
+}
+
 /* ===== Animations ===== */
 @keyframes fadeIn {
     from { opacity: 0; }
