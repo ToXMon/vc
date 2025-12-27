@@ -16,7 +16,8 @@
     
     <!-- Preload critical resources -->
     <link rel="preload" href="scripts/game.js" as="script">
-    <script src="scripts/firebase-config.js" defer></script>
+    <!-- Load Firebase config first, before modules -->
+    <script src="scripts/firebase-config.js"></script>
 </head>
 <body>
     <!-- Loading Screen -->

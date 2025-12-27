@@ -1,6 +1,6 @@
 // Firebase configuration for All or Nothing dice game
 // These are public client keys - safe to commit
-const firebaseConfig = {
+window.firebaseConfig = {
   apiKey: "AIzaSyBSDa7JZfW-95pZL4fN8LorAsf8ERdSA2o",
   authDomain: "allornothing-183fb.firebaseapp.com",
   databaseURL: "https://allornothing-183fb-default-rtdb.firebaseio.com",

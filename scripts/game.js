@@ -54,16 +54,46 @@ class AllOrNothingGame {
     init() {
         console.log('Initializing All or Nothing...');
         
-        // Initialize WebSocket Manager (legacy) and Firebase room helpers (new)
-        this.wsManager = new WebSocketManager();
+        // Safety timeout: ensure loading screen is hidden after 5 seconds max
+        setTimeout(() => {
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
+                console.warn('Loading screen timeout - forcing hide');
+                this.hideLoading();
+                this.showScreen('main-menu');
+            }
+        }, 5000);
+        
+        try {
+            // Initialize WebSocket Manager (legacy) and Firebase room helpers (new)
+            this.wsManager = new WebSocketManager();
+        } catch (error) {
+            console.warn('Failed to initialize WebSocket Manager:', error);
+            // Continue without WebSocket - Firebase will be primary
+        }
+        
         this.roomId = null;
         this.playerId = null;
         this.playerName = null;
         
         // Setup event listeners
-        this.setupEventListeners();
-        this.setupWebSocketHandlers();
-        this.setupConnectionMonitoring();
+        try {
+            this.setupEventListeners();
+        } catch (error) {
+            console.error('Error setting up event listeners:', error);
+        }
+        
+        try {
+            this.setupWebSocketHandlers();
+        } catch (error) {
+            console.warn('Error setting up WebSocket handlers:', error);
+        }
+        
+        try {
+            this.setupConnectionMonitoring();
+        } catch (error) {
+            console.warn('Error setting up connection monitoring:', error);
+        }
         
         // Check for room code in URL
         this.checkURLParameters();
@@ -1619,5 +1649,20 @@ class AllOrNothingGame {
 
 // Initialize game when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    window.game = new AllOrNothingGame();
+    try {
+        window.game = new AllOrNothingGame();
+    } catch (error) {
+        console.error('Failed to initialize game:', error);
+        // Ensure loading screen is hidden even if initialization fails
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+            loadingScreen.classList.add('hidden');
+        }
+        const mainMenu = document.getElementById('main-menu');
+        if (mainMenu) {
+            mainMenu.classList.remove('hidden');
+        }
+        // Show error to user
+        alert('Failed to initialize game. Please refresh the page. Error: ' + error.message);
+    }
 });
