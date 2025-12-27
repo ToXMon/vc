@@ -127,6 +127,16 @@ The game includes a simulation mode for development. To enable real multiplayer:
 2. Update the connection URL in `scripts/websocket.js`
 3. Set `simulateMode = false` in the WebSocketManager constructor
 
+### Firebase Realtime Database (Multiplayer)
+Client-only multiplayer uses Firebase RTDB. Config keys are public and safe to commit.
+
+1. In Firebase console, create a project and Realtime Database (start in locked or test mode as needed).
+2. Copy `scripts/firebase-config.sample.js` to `scripts/firebase-config.js`.
+3. Replace the placeholder values (`apiKey`, `authDomain`, `databaseURL`, `projectId`, `storageBucket`, `messagingSenderId`, `appId`) with your project config from **Project settings → General → Your apps → SDK setup**.
+4. Keep `scripts/firebase-config.js` in the repo for GitHub Pages/static hosting so the client can initialize Firebase at runtime.
+5. Database rules: copy `firebase-rules.sample.json`, adjust as needed, and deploy via Firebase console or CLI (`firebase deploy --only database`). Ensure `databaseURL` matches your RTDB instance.
+6. To deploy with Firebase CLI: install globally (`npm i -g firebase-tools`), run `firebase login`, `firebase init database` (select existing project, skip rules overwrite), and set your rules file path to `firebase-rules.sample.json` or your edited copy. Then `firebase deploy --only database`.
+
 ## Browser Support
 
 - ✅ Chrome 90+

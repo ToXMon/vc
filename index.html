@@ -16,6 +16,7 @@
     
     <!-- Preload critical resources -->
     <link rel="preload" href="scripts/game.js" as="script">
+    <script src="scripts/firebase-config.js" defer></script>
 </head>
 <body>
     <!-- Loading Screen -->
@@ -61,6 +62,7 @@
             <div class="lobby-players">
                 <h3>Players in Lobby</h3>
                 <ul id="player-list"></ul>
+                <div id="presence-status" class="presence-status"></div>
             </div>
             <button id="btn-start-game" class="btn-primary">Start Game</button>
             <button id="btn-leave-lobby" class="btn-secondary">Leave</button>
@@ -103,7 +105,10 @@
                 <span class="room-info" id="current-room-code"></span>
                 <span class="turn-indicator" id="turn-indicator">Waiting...</span>
             </div>
-            <button id="btn-menu" class="icon-btn">☰</button>
+            <div class="header-actions">
+                <button id="btn-invite" class="icon-btn" title="Invite Friend">📤</button>
+                <button id="btn-menu" class="icon-btn">☰</button>
+            </div>
         </div>
 
         <!-- Player Areas (6 players) -->
@@ -208,6 +213,32 @@
         </div>
     </div>
 
+    <!-- Share Modal -->
+    <div id="share-modal" class="modal-overlay hidden">
+        <div class="modal-content share-modal-content">
+            <button id="btn-close-share" class="modal-close-btn">&times;</button>
+            <h2 class="share-modal-title">🎮 Invite a Friend!</h2>
+            <p class="share-modal-subtitle">Share this code to play together</p>
+            <div class="room-code-display">
+                <span id="share-room-code">------</span>
+            </div>
+            <div class="share-buttons">
+                <button id="btn-copy-code" class="btn-primary share-btn">
+                    <span class="btn-icon">📋</span>
+                    <span class="btn-text">Copy Code</span>
+                </button>
+                <button id="btn-native-share" class="btn-secondary share-btn">
+                    <span class="btn-icon">📤</span>
+                    <span class="btn-text">Share</span>
+                </button>
+            </div>
+            <p class="share-hint">Your friend can join at this URL or enter the code manually</p>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container"></div>
+
     <!-- Audio Elements -->
     <audio id="audio-dice-roll" preload="auto">
         <source src="assets/sounds/dice-roll.mp3" type="audio/mpeg">
@@ -223,11 +254,13 @@
     </audio>
 
     <!-- Scripts -->
+    <script type="module" src="scripts/firebase.js"></script>
+    <script type="module" src="scripts/firebase-room.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="scripts/lib/three.min.js"></script>
     <script src="scripts/dice3d.js"></script>
     <script src="scripts/websocket.js"></script>
-    <script src="scripts/game.js"></script>
+    <script type="module" src="scripts/game.js"></script>
     <script>
         // Register service worker
         if ('serviceWorker' in navigator) {

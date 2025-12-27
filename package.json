@@ -6,7 +6,13 @@
   "scripts": {
     "start": "npx http-server -p 8080 -c-1",
     "build": "echo 'Build complete'",
-    "test": "echo 'Tests not yet implemented'"
+    "test": "node tests/unit/game-reducer.test.js",
+    "test:e2e": "npx playwright test --config=tests/e2e/playwright.config.ts",
+    "test:e2e:headed": "npx playwright test --config=tests/e2e/playwright.config.ts --headed",
+    "test:e2e:debug": "npx playwright test --config=tests/e2e/playwright.config.ts --debug",
+    "test:all": "npm run test && npm run test:e2e",
+    "rules:serve": "echo 'Use firebase emulators:start --only database to serve rules locally (Firebase CLI required)'",
+    "rules:deploy": "echo 'Use firebase deploy --only database to push RTDB rules (Firebase CLI required)'"
   },
   "keywords": [
     "pwa",
@@ -20,6 +26,7 @@
     "three": "^0.160.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.40.0",
     "http-server": "^14.1.1"
   }
 }

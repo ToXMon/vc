@@ -1,3 +1,26 @@
+import {
+    createRoom,
+    joinRoom,
+    getRoom,
+    setPresence,
+    subscribeRoom,
+    removePlayer,
+    updateMetadata,
+    closeRoom,
+    generateRoomId,
+    initializeGameState,
+    subscribeGameState,
+    rollDiceTransaction,
+    isPlayerTurn,
+    getGameState,
+    resetGameState,
+    sendChatMessage,
+    subscribeChat,
+    clearChat
+} from './firebase-room.js';
+
+import { subscribeConnectionState } from './firebase.js';
+
 // Main Game Logic for All or Nothing
 class AllOrNothingGame {
     constructor() {
@@ -13,18 +36,34 @@ class AllOrNothingGame {
             volume: 0.5
         };
         
+        this.roomUnsubscribe = null;
+        this.presenceUnsubscribe = null;
+        this.gameStateUnsubscribe = null;
+        this.chatUnsubscribe = null;
+        this.connectionUnsubscribe = null;
+        this.isOnline = true;
+        this.isHost = false;
+        this.renderedChatIds = new Set();
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectTimer = null;
+        this.statusHideTimeout = null;
         this.init();
     }
     
     init() {
         console.log('Initializing All or Nothing...');
         
-        // Initialize WebSocket Manager
+        // Initialize WebSocket Manager (legacy) and Firebase room helpers (new)
         this.wsManager = new WebSocketManager();
+        this.roomId = null;
+        this.playerId = null;
+        this.playerName = null;
         
         // Setup event listeners
         this.setupEventListeners();
         this.setupWebSocketHandlers();
+        this.setupConnectionMonitoring();
         
         // Check for room code in URL
         this.checkURLParameters();
@@ -38,6 +77,7 @@ class AllOrNothingGame {
             if (roomCode && roomCode.length === 6) {
                 this.showScreen('lobby-screen');
                 document.getElementById('room-code').value = roomCode.toUpperCase();
+                this.roomId = roomCode.toUpperCase();
             } else {
                 this.showScreen('main-menu');
             }
@@ -50,6 +90,7 @@ class AllOrNothingGame {
         if (roomCode && roomCode.length === 6) {
             // Valid room code found in URL
             console.log('Room code from URL:', roomCode);
+            this.roomId = roomCode.toUpperCase();
         }
     }
     
@@ -133,6 +174,31 @@ class AllOrNothingGame {
         document.getElementById('btn-exit-game').addEventListener('click', () => {
             this.exitToMenu();
         });
+        
+        // Share Modal
+        document.getElementById('btn-copy-code').addEventListener('click', () => {
+            this.copyRoomCode();
+        });
+        
+        document.getElementById('btn-native-share').addEventListener('click', () => {
+            this.nativeShare();
+        });
+        
+        document.getElementById('btn-close-share').addEventListener('click', () => {
+            this.hideShareModal();
+        });
+        
+        document.getElementById('share-modal').addEventListener('click', (e) => {
+            // Close modal when clicking overlay (not content)
+            if (e.target.id === 'share-modal') {
+                this.hideShareModal();
+            }
+        });
+        
+        // Invite button in game header
+        document.getElementById('btn-invite').addEventListener('click', () => {
+            this.showShareModal(this.roomId);
+        });
     }
     
     setupWebSocketHandlers() {
@@ -206,6 +272,102 @@ class AllOrNothingGame {
         });
     }
     
+    setupConnectionMonitoring() {
+        // Monitor Firebase connection state
+        this.connectionUnsubscribe = subscribeConnectionState((isConnected) => {
+            this.handleConnectionChange(isConnected);
+        });
+        
+        // Also listen for browser online/offline events
+        window.addEventListener('online', () => this.handleBrowserOnline());
+        window.addEventListener('offline', () => this.handleBrowserOffline());
+    }
+    
+    handleConnectionChange(isConnected) {
+        const wasOnline = this.isOnline;
+        this.isOnline = isConnected;
+        
+        console.log('Connection state changed:', isConnected ? 'online' : 'offline');
+        
+        if (isConnected) {
+            // Just reconnected
+            this.reconnectAttempts = 0;
+            if (this.reconnectTimer) {
+                clearTimeout(this.reconnectTimer);
+                this.reconnectTimer = null;
+            }
+            this.hideConnectionBadge();
+            
+            if (!wasOnline && this.roomId) {
+                // Re-establish presence
+                this.setPresence(true);
+                this.showNotification('Reconnected!');
+            }
+            
+            // Re-enable UI based on current game state
+            if (this.gameState === 'playing') {
+                this.refetchGameState();
+            }
+        } else {
+            // Just went offline
+            this.showConnectionBadge('offline');
+            this.disableRollButton();
+            
+            // Start reconnection attempts with exponential backoff
+            this.attemptReconnect();
+        }
+    }
+    
+    handleBrowserOnline() {
+        console.log('Browser reports online');
+        // Firebase will handle the actual reconnection
+        this.showConnectionBadge('reconnecting');
+    }
+    
+    handleBrowserOffline() {
+        console.log('Browser reports offline');
+        this.isOnline = false;
+        this.showConnectionBadge('offline');
+        this.disableRollButton();
+    }
+    
+    attemptReconnect() {
+        if (this.isOnline) return;
+        
+        this.reconnectAttempts++;
+        
+        if (this.reconnectAttempts > this.maxReconnectAttempts) {
+            this.showConnectionBadge('offline');
+            this.updateStatusMessage('Connection lost. Please refresh the page.');
+            return;
+        }
+        
+        this.showConnectionBadge('reconnecting');
+        
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 16000);
+        console.log(`Reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
+        
+        this.reconnectTimer = setTimeout(() => {
+            if (!this.isOnline) {
+                // Firebase handles actual reconnection; we just show status
+                this.attemptReconnect();
+            }
+        }, delay);
+    }
+    
+    async refetchGameState() {
+        if (!this.roomId) return;
+        try {
+            const state = await getGameState(this.roomId);
+            if (state) {
+                this.handleGameStateUpdate(state);
+            }
+        } catch (err) {
+            console.error('Failed to refetch game state:', err);
+        }
+    }
+    
     hideLoading() {
         const loadingScreen = document.getElementById('loading-screen');
         loadingScreen.classList.add('hidden');
@@ -228,20 +390,14 @@ class AllOrNothingGame {
     // Main Menu Actions
     startNewGame() {
         this.showScreen('lobby-screen');
-        this.wsManager.connect().then(() => {
-            console.log('Connected to game server');
-        }).catch(err => {
-            console.log('Running in offline mode');
-        });
+        // Firebase flow: we defer actual room creation until startGameFromLobby
+        this.playerId = this.playerId || this.generateLocalPlayerId();
     }
     
     joinGame() {
         this.showScreen('lobby-screen');
-        this.wsManager.connect().then(() => {
-            console.log('Connected to game server');
-        }).catch(err => {
-            console.log('Running in offline mode');
-        });
+        this.playerId = this.playerId || this.generateLocalPlayerId();
+        // If URL has room, it will prefill and we will validate on start
     }
     
     showTutorial() {
@@ -263,13 +419,18 @@ class AllOrNothingGame {
     // Lobby Actions
     generateRoomCode() {
         const playerName = document.getElementById('player-name').value.trim() || 'Player';
-        this.wsManager.createRoom(playerName);
+        this.playerName = playerName;
+        // Generate room id (6 chars) for Firebase flow
+        this.roomId = generateRoomId();
+        document.getElementById('room-code').value = this.roomId;
+        this.updateURL(this.roomId);
+        document.getElementById('current-room-code').textContent = `Room: ${this.roomId}`;
     }
     
     copyRoomLink() {
         const roomCode = document.getElementById('room-code').value.trim();
         if (!roomCode) {
-            this.showConfirmationDialog('Please generate a room code first', () => {});
+            this.showToast('Please generate a room code first', 'error');
             return;
         }
         
@@ -278,7 +439,7 @@ class AllOrNothingGame {
         // Copy to clipboard
         if (navigator.clipboard) {
             navigator.clipboard.writeText(shareUrl).then(() => {
-                this.showConfirmationDialog('Room link copied! Share it with your cofounder.', () => {});
+                this.showToast('Room link copied!', 'success');
             }).catch(err => {
                 console.error('Failed to copy:', err);
                 this.showShareDialog(shareUrl);
@@ -292,8 +453,131 @@ class AllOrNothingGame {
         const message = `Share this link with your cofounder:\n\n${shareUrl}`;
         this.showConfirmationDialog(message, () => {});
     }
+
+    // ================================================================
+    // Share Modal Methods
+    // ================================================================
     
-    startGameFromLobby() {
+    showShareModal(roomCode) {
+        if (!roomCode) return;
+        
+        const modal = document.getElementById('share-modal');
+        const codeDisplay = document.getElementById('share-room-code');
+        const nativeShareBtn = document.getElementById('btn-native-share');
+        
+        // Update room code display
+        codeDisplay.textContent = roomCode;
+        
+        // Check if Web Share API is available
+        if (navigator.share) {
+            nativeShareBtn.classList.remove('hidden');
+        } else {
+            nativeShareBtn.classList.add('hidden');
+        }
+        
+        // Reset copy button state
+        const copyBtn = document.getElementById('btn-copy-code');
+        copyBtn.classList.remove('copied');
+        copyBtn.querySelector('.btn-text').textContent = 'Copy Code';
+        
+        // Show modal
+        modal.classList.remove('hidden');
+    }
+    
+    hideShareModal() {
+        const modal = document.getElementById('share-modal');
+        modal.classList.add('hidden');
+    }
+    
+    copyRoomCode() {
+        const roomCode = this.roomId;
+        if (!roomCode) return;
+        
+        const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+        const shareText = `Join my All or Nothing game! Room: ${roomCode}\n${shareUrl}`;
+        
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(shareText).then(() => {
+                // Visual feedback on button
+                const copyBtn = document.getElementById('btn-copy-code');
+                copyBtn.classList.add('copied');
+                copyBtn.querySelector('.btn-text').textContent = 'Copied!';
+                
+                // Show toast
+                this.showToast('Copied to clipboard!', 'success');
+                
+                // Reset button after 2 seconds
+                setTimeout(() => {
+                    copyBtn.classList.remove('copied');
+                    copyBtn.querySelector('.btn-text').textContent = 'Copy Code';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                this.showToast('Failed to copy', 'error');
+            });
+        } else {
+            // Fallback for older browsers
+            this.showConfirmationDialog(`Copy this: ${shareText}`, () => {});
+        }
+    }
+    
+    async nativeShare() {
+        const roomCode = this.roomId;
+        if (!roomCode) return;
+        
+        const shareUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+        const shareData = {
+            title: 'All or Nothing - Dice Game',
+            text: `Join my All or Nothing game! Room: ${roomCode}`,
+            url: shareUrl
+        };
+        
+        try {
+            await navigator.share(shareData);
+            // User shared successfully (or cancelled - we don't get feedback on cancel)
+        } catch (err) {
+            // User cancelled or error occurred
+            if (err.name !== 'AbortError') {
+                console.error('Share failed:', err);
+            }
+            // Don't show error for user cancellation
+        }
+    }
+    
+    showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        
+        container.appendChild(toast);
+        
+        // Auto-dismiss after 2 seconds
+        setTimeout(() => {
+            toast.classList.add('fade-out');
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    container.removeChild(toast);
+                }
+            }, 300);
+        }, 2000);
+    }
+
+    generateLocalPlayerId() {
+        return 'player_' + Math.random().toString(36).slice(2, 10);
+    }
+
+    async setPresence(connected = true) {
+        if (!this.roomId || !this.playerId) return;
+        try {
+            await setPresence(this.roomId, this.playerId, connected);
+        } catch (err) {
+            console.error('Failed to set presence', err);
+        }
+    }
+    
+    async startGameFromLobby() {
         const playerName = document.getElementById('player-name').value.trim() || 'Player';
         const roomCodeInput = document.getElementById('room-code');
         const roomCode = roomCodeInput.value.trim();
@@ -307,40 +591,96 @@ class AllOrNothingGame {
             this.showConfirmationDialog('Please enter or generate a room code', () => {});
             return;
         }
-        
-        // Check if this is a new room (we're the host) or joining existing
-        if (roomCode.length === 6 && roomCode === this.wsManager.roomCode) {
-            // This is our room - we're the host, just start
-            console.log('Starting game as host');
-        } else {
-            // Joining another room - connect to peer
-            console.log('Joining room:', roomCode);
-            this.wsManager.joinRoom(roomCode, playerName);
+        this.playerName = playerName;
+        this.playerId = this.playerId || this.generateLocalPlayerId();
+        this.roomId = roomCode.toUpperCase();
+
+        // Show connecting status
+        this.showGameStatus('Connecting...');
+
+        try {
+            // Decide host vs joiner based on whether room exists
+            const existing = await getRoom(this.roomId);
+            const isCreatingRoom = !existing;
+            
+            if (isCreatingRoom) {
+                await createRoom({ roomId: this.roomId, hostId: this.playerId, hostName: playerName });
+                this.isHost = true;
+            } else {
+                await joinRoom({ roomId: this.roomId, playerId: this.playerId, playerName });
+                this.isHost = existing.metadata && existing.metadata.hostId === this.playerId;
+            }
+            await this.setPresence(true);
+            this.startRoomSubscriptions();
+            this.showScreen('game-screen');
+            if (!this.dice3D) {
+                this.dice3D = new Dice3D('dice-canvas-container');
+            }
+            this.gameState = 'playing';
+            // Disable roll button until game state subscription confirms it's our turn
+            this.disableRollButton();
+            
+            // Show appropriate status and auto-hide
+            if (isCreatingRoom) {
+                this.showGameStatus('Waiting for opponent...');
+                // Auto-hide status after 2 seconds and show share modal for host
+                setTimeout(() => {
+                    this.hideGameStatus();
+                    this.showShareModal(this.roomId);
+                }, 1500);
+            } else {
+                this.showGameStatus('Joined! Waiting for game to start...');
+                // Auto-hide status after 2 seconds for joiners
+                this.hideGameStatusDelayed(2000);
+            }
+            
+            this.playSound('background-music', true);
+        } catch (err) {
+            console.error('Failed to start game via Firebase', err);
+            this.hideGameStatus();
+            const message = err && err.message === 'room_full'
+                ? 'Room is full (max 2 players).'
+                : 'Could not join or create room. Please try again.';
+            this.showConfirmationDialog(message, () => {});
         }
-        
-        // Initialize players
-        this.initializePlayers(playerName);
-        
-        // Show game screen
-        this.showScreen('game-screen');
-        
-        // Initialize 3D dice
-        if (!this.dice3D) {
-            this.dice3D = new Dice3D('dice-canvas-container');
-        }
-        
-        // Start game
-        this.gameState = 'playing';
-        this.currentPlayerIndex = 0;
-        this.updateTurnIndicator();
-        this.enableRollButton();
-        
-        this.playSound('background-music', true);
     }
     
-    leaveLobby() {
+    async leaveLobby() {
+        try {
+            if (this.roomId && this.playerId) {
+                await setPresence(this.roomId, this.playerId, false);
+                await removePlayer(this.roomId, this.playerId);
+                const room = await getRoom(this.roomId);
+                if (room && room.players) {
+                    const remaining = Object.keys(room.players);
+                    if (remaining.length === 0) {
+                        await closeRoom(this.roomId);
+                    } else if (room.metadata && room.metadata.hostId === this.playerId) {
+                        const newHost = remaining[0];
+                        await updateMetadata(this.roomId, { hostId: newHost });
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Error during leave/cleanup', err);
+        }
+        this.teardownRoomSubscriptions();
         this.wsManager.leaveRoom();
         this.showScreen('main-menu');
+    }
+
+    startRoomSubscriptions() {
+        this.teardownRoomSubscriptions();
+        if (!this.roomId) return;
+        this.roomUnsubscribe = subscribeRoom(this.roomId, (room) => {
+            this.handleRoomUpdate(room);
+        });
+        this.gameStateUnsubscribe = subscribeGameState(this.roomId, (state) => {
+            this.handleGameStateUpdate(state);
+        });
+        this.chatUnsubscribe = subscribeChat(this.roomId, (messages) => {
+            this.handleChatUpdate(messages);
+        });
     }
     
     initializePlayers(mainPlayerName) {
@@ -348,7 +688,7 @@ class AllOrNothingGame {
         
         // Add main player
         this.players.push({
-            id: this.wsManager.playerId,
+            id: this.playerId || this.wsManager.playerId,
             name: mainPlayerName,
             chips: { green: [], red: [], heart: [] },
             isActive: true
@@ -368,7 +708,7 @@ class AllOrNothingGame {
         this.updatePlayerAreas();
     }
     
-    updatePlayerList(players) {
+    updatePlayerList(players, presenceMap = {}) {
         const playerList = document.getElementById('player-list');
         playerList.innerHTML = '';
         
@@ -377,6 +717,270 @@ class AllOrNothingGame {
             li.textContent = player.name;
             playerList.appendChild(li);
         });
+        this.renderPresence(players, presenceMap);
+    }
+
+    renderPresence(players, presenceMap = {}) {
+        const presenceEl = document.getElementById('presence-status');
+        if (!presenceEl) return;
+        presenceEl.innerHTML = '';
+        players.forEach((p) => {
+            const chip = document.createElement('span');
+            chip.className = 'presence-chip';
+            const dot = document.createElement('span');
+            const presence = presenceMap[p.id];
+            const statusClass = presence ? (presence.connected ? 'connected' : 'offline') : 'offline';
+            dot.className = `presence-dot ${statusClass}`;
+            chip.appendChild(dot);
+            const label = document.createElement('span');
+            label.textContent = p.name || 'Player';
+            chip.appendChild(label);
+            presenceEl.appendChild(chip);
+        });
+    }
+
+    teardownRoomSubscriptions() {
+        if (this.roomUnsubscribe) {
+            this.roomUnsubscribe();
+            this.roomUnsubscribe = null;
+        }
+        if (this.presenceUnsubscribe) {
+            this.presenceUnsubscribe();
+            this.presenceUnsubscribe = null;
+        }
+        if (this.gameStateUnsubscribe) {
+            this.gameStateUnsubscribe();
+            this.gameStateUnsubscribe = null;
+        }
+        if (this.chatUnsubscribe) {
+            this.chatUnsubscribe();
+            this.chatUnsubscribe = null;
+        }
+        this.renderedChatIds.clear();
+    }
+
+    async handleRoomUpdate(room) {
+        if (!room) return;
+        const players = Object.entries(room.players || {}).map(([id, val]) => ({ id, name: val.name || 'Player' }));
+        this.updatePlayerList(players, room.presence || {});
+        
+        // Initialize game state when both players have joined and game hasn't started yet
+        const state = room.state;
+        if (this.isHost && players.length === 2 && state && state.status === 'lobby') {
+            const playerIds = players.map(p => p.id);
+            try {
+                await initializeGameState(this.roomId, playerIds);
+                this.showNotification('Game started!');
+            } catch (err) {
+                console.error('Failed to initialize game state:', err);
+            }
+        }
+        
+        // Update players array for local state
+        this.players = players.map((p, idx) => ({
+            id: p.id,
+            name: p.name,
+            chips: { green: [], red: [], heart: [] },
+            isActive: true
+        }));
+        
+        // Check connection status for all players
+        const presence = room.presence || {};
+        this.updateConnectionStatus(presence);
+    }
+    
+    /**
+     * Handle real-time game state updates from Firebase.
+     * This syncs dice results, chip counts, turn state, and win condition.
+     */
+    handleGameStateUpdate(state) {
+        if (!state) return;
+        
+        console.log('Game state update:', state);
+        
+        // Update local game state status
+        this.gameState = state.status;
+        
+        // When game transitions to 'playing', hide the status bar
+        if (state.status === 'playing' && state.playerOrder && state.playerOrder.length >= 2) {
+            // Game has started with both players - hide status after brief delay
+            this.hideGameStatusDelayed(1500);
+        }
+        
+        // Update dice display if dice have been rolled
+        if (state.dice && (state.dice.g || state.dice.r || state.dice.y)) {
+            if (this.dice3D && !this.dice3D.isRolling) {
+                // Show the dice values (visual sync for remote rolls)
+                this.displayDiceValues(state.dice);
+            }
+        }
+        
+        // Sync chip counts from Firebase state
+        this.syncChipsFromState(state);
+        
+        // Update turn indicator
+        if (state.playerOrder && state.currentPlayer) {
+            const currentPlayerData = this.players.find(p => p.id === state.currentPlayer);
+            const indicator = document.getElementById('turn-indicator');
+            if (currentPlayerData) {
+                indicator.textContent = `${currentPlayerData.name}'s Turn`;
+            }
+            
+            // Find current player index
+            this.currentPlayerIndex = state.playerOrder.indexOf(state.currentPlayer);
+            
+            // Highlight active player area
+            document.querySelectorAll('.player-area').forEach((area, idx) => {
+                area.classList.toggle('active', idx === this.currentPlayerIndex);
+            });
+        }
+        
+        // Gate roll button based on turn and connection
+        this.updateRollButtonState(state);
+        
+        // Check for game over
+        if (state.status === 'finished' && state.winnerId) {
+            this.handleGameFinished(state.winnerId);
+        }
+    }
+    
+    /**
+     * Sync chip counts from Firebase state to local player objects.
+     */
+    syncChipsFromState(state) {
+        if (!state.chips || !state.playerOrder) return;
+        
+        state.playerOrder.forEach((playerId, idx) => {
+            const chips = state.chips[playerId];
+            if (!chips) return;
+            
+            // Find or create player in local array
+            let player = this.players.find(p => p.id === playerId);
+            if (!player && idx < this.players.length) {
+                player = this.players[idx];
+                player.id = playerId;
+            }
+            if (!player) return;
+            
+            // Convert counts to arrays for UI compatibility
+            player.chips = {
+                green: new Array(chips.green || 0).fill(1),
+                red: new Array(chips.red || 0).fill(1),
+                heart: new Array(chips.heart || 0).fill(1)
+            };
+            
+            this.updatePlayerChips(idx);
+        });
+    }
+    
+    /**
+     * Display dice values after a remote roll (visual sync).
+     */
+    displayDiceValues(dice) {
+        // The dice3D module handles visual display; this is for status updates
+        const msg = `🎲 Rolled: ${dice.g}, ${dice.r}, ${dice.y}`;
+        this.updateStatusMessage(msg);
+    }
+    
+    /**
+     * Update roll button state based on turn and connection.
+     */
+    updateRollButtonState(state) {
+        const isMyTurn = state.currentPlayer === this.playerId;
+        const isPlaying = state.status === 'playing';
+        
+        if (isMyTurn && isPlaying && this.isOnline) {
+            this.enableRollButton();
+            this.updateStatusMessage("Your turn! Roll the dice.");
+        } else if (!this.isOnline) {
+            this.disableRollButton();
+            this.updateStatusMessage("Offline - Reconnecting...");
+        } else if (!isPlaying) {
+            this.disableRollButton();
+        } else {
+            this.disableRollButton();
+            const currentPlayerData = this.players.find(p => p.id === state.currentPlayer);
+            this.updateStatusMessage(`Waiting for ${currentPlayerData?.name || 'opponent'}...`);
+        }
+    }
+    
+    /**
+     * Handle game finished state.
+     */
+    handleGameFinished(winnerId) {
+        if (this.gameState === 'showing_winner') return; // Prevent duplicate
+        this.gameState = 'showing_winner';
+        
+        const winnerIndex = this.players.findIndex(p => p.id === winnerId);
+        const winner = this.players[winnerIndex];
+        
+        if (winnerIndex !== -1) {
+            const winnerArea = document.getElementById(`player-${winnerIndex + 1}`);
+            if (winnerArea) {
+                winnerArea.classList.add('winner');
+            }
+        }
+        
+        this.playSound('audio-win');
+        this.stopSound('background-music');
+        
+        setTimeout(() => {
+            this.showWinnerScreen(winner || { name: 'Winner', chips: { green: [], red: [], heart: [] } });
+        }, 2000);
+    }
+    
+    /**
+     * Update connection status indicators.
+     */
+    updateConnectionStatus(presence) {
+        const presenceEl = document.getElementById('presence-status');
+        if (!presenceEl) return;
+        
+        // Check if opponent is online
+        let opponentOffline = false;
+        this.players.forEach((p) => {
+            if (p.id !== this.playerId) {
+                const pres = presence[p.id];
+                if (!pres || !pres.connected) {
+                    opponentOffline = true;
+                }
+            }
+        });
+        
+        if (opponentOffline) {
+            this.showConnectionBadge('opponent-offline');
+        } else {
+            this.hideConnectionBadge();
+        }
+    }
+    
+    showConnectionBadge(status) {
+        let badge = document.getElementById('connection-badge');
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.id = 'connection-badge';
+            badge.className = 'connection-badge';
+            document.body.appendChild(badge);
+        }
+        
+        if (status === 'offline') {
+            badge.textContent = '⚡ Offline';
+            badge.className = 'connection-badge offline';
+        } else if (status === 'reconnecting') {
+            badge.textContent = '🔄 Reconnecting...';
+            badge.className = 'connection-badge reconnecting';
+        } else if (status === 'opponent-offline') {
+            badge.textContent = '👤 Opponent disconnected';
+            badge.className = 'connection-badge opponent-offline';
+        }
+        badge.style.display = 'block';
+    }
+    
+    hideConnectionBadge() {
+        const badge = document.getElementById('connection-badge');
+        if (badge) {
+            badge.style.display = 'none';
+        }
     }
     
     updatePlayerAreas() {
@@ -442,21 +1046,76 @@ class AllOrNothingGame {
     }
     
     // Game Actions
-    rollDice() {
+    async rollDice() {
         if (!this.dice3D || this.dice3D.isRolling) return;
+        
+        // Check if we're online and it's our turn
+        if (!this.isOnline) {
+            this.showNotification('Cannot roll while offline');
+            return;
+        }
+        
+        // Double-check turn validation
+        const canRoll = await isPlayerTurn(this.roomId, this.playerId);
+        if (!canRoll) {
+            this.showNotification("Not your turn!");
+            return;
+        }
         
         this.disableRollButton();
         this.playSound('audio-dice-roll');
         
-        const results = this.dice3D.rollDice();
+        // Generate dice results locally
+        const visualResults = this.dice3D.rollDice();
         
-        // Send dice results to peer
-        this.wsManager.rollDice(results);
+        // Convert to Firebase format { g, r, y }
+        const diceResults = {
+            g: visualResults[0],
+            r: visualResults[1],
+            y: visualResults[2]
+        };
         
-        setTimeout(() => {
-            this.processDiceResults(results);
-            this.nextTurn();
-        }, 2000); // Match the dice animation duration
+        // Wait for animation to complete
+        setTimeout(async () => {
+            try {
+                // Submit roll to Firebase with transaction
+                const result = await rollDiceTransaction(this.roomId, this.playerId, diceResults);
+                
+                if (!result.success) {
+                    this.showNotification(result.error || 'Roll failed');
+                    // Re-enable if still our turn
+                    const stillMyTurn = await isPlayerTurn(this.roomId, this.playerId);
+                    if (stillMyTurn) {
+                        this.enableRollButton();
+                    }
+                    return;
+                }
+                
+                // Success - state update will come via subscription
+                this.showRollResult(diceResults);
+                
+            } catch (err) {
+                console.error('Dice roll transaction failed:', err);
+                this.showNotification('Roll failed - please try again');
+            }
+        }, 2000); // Match dice animation duration
+    }
+    
+    showRollResult(dice) {
+        const values = [dice.g, dice.r, dice.y];
+        const allSame = values[0] === values[1] && values[1] === values[2];
+        const hasPair = values[0] === values[1] || values[1] === values[2] || values[0] === values[2];
+        
+        if (allSame) {
+            this.updateStatusMessage('🎲 Triple! Green chip earned!');
+            this.playSound('audio-chip-collect');
+        } else if (hasPair) {
+            this.updateStatusMessage('🎲 Pair! Red chip earned!');
+            this.playSound('audio-chip-collect');
+        } else {
+            this.updateStatusMessage('🎲 No match. Heart chip earned!');
+            this.playSound('audio-chip-collect');
+        }
     }
     
     handleRemoteDiceRoll(results, playerId) {
@@ -594,6 +1253,46 @@ class AllOrNothingGame {
         }, 2000);
     }
     
+    // ================================================================
+    // Game Status Bar Methods
+    // ================================================================
+    
+    showGameStatus(message) {
+        const gameStatus = document.getElementById('game-status');
+        const statusMessage = document.getElementById('status-message');
+        
+        statusMessage.textContent = message;
+        gameStatus.classList.remove('hidden');
+        
+        // Clear any pending hide timeout
+        if (this.statusHideTimeout) {
+            clearTimeout(this.statusHideTimeout);
+            this.statusHideTimeout = null;
+        }
+    }
+    
+    hideGameStatus() {
+        const gameStatus = document.getElementById('game-status');
+        gameStatus.classList.add('hidden');
+        
+        // Clear any pending hide timeout
+        if (this.statusHideTimeout) {
+            clearTimeout(this.statusHideTimeout);
+            this.statusHideTimeout = null;
+        }
+    }
+    
+    hideGameStatusDelayed(ms = 2000) {
+        // Clear any existing timeout
+        if (this.statusHideTimeout) {
+            clearTimeout(this.statusHideTimeout);
+        }
+        
+        this.statusHideTimeout = setTimeout(() => {
+            this.hideGameStatus();
+        }, ms);
+    }
+    
     enableRollButton() {
         const btn = document.getElementById('btn-roll-dice');
         btn.disabled = false;
@@ -652,25 +1351,67 @@ class AllOrNothingGame {
         chatPanel.classList.toggle('collapsed');
     }
     
-    sendChatMessage() {
+    async sendChatMessage() {
         const input = document.getElementById('chat-input');
         const message = input.value.trim();
         
-        if (message) {
-            // Send to peer
-            this.wsManager.sendChatMessage(message);
+        if (!message) return;
+        
+        // Check if online
+        if (!this.isOnline) {
+            this.showNotification('Cannot send message while offline');
+            return;
+        }
+        
+        // Disable input while sending
+        input.disabled = true;
+        const sendBtn = document.getElementById('btn-send-chat');
+        sendBtn.disabled = true;
+        
+        try {
+            const result = await sendChatMessage(
+                this.roomId,
+                this.playerId,
+                this.playerName,
+                message
+            );
             
-            // Also show locally
-            this.addChatMessage('You', message);
-            
-            input.value = '';
+            if (result.success) {
+                input.value = '';
+            } else {
+                this.showNotification(result.error || 'Failed to send message');
+            }
+        } catch (err) {
+            console.error('Chat send error:', err);
+            this.showNotification('Failed to send message');
+        } finally {
+            input.disabled = false;
+            sendBtn.disabled = false;
+            input.focus();
         }
     }
     
-    addChatMessage(sender, message) {
+    /**
+     * Handle real-time chat updates from Firebase.
+     */
+    handleChatUpdate(messages) {
+        const messagesContainer = document.getElementById('chat-messages');
+        if (!messagesContainer) return;
+        
+        // Only render new messages to avoid flickering
+        messages.forEach((msg) => {
+            if (this.renderedChatIds.has(msg.id)) return;
+            this.renderedChatIds.add(msg.id);
+            
+            const isMe = msg.senderId === this.playerId;
+            this.renderChatMessage(msg.senderName, msg.message, isMe);
+        });
+    }
+    
+    renderChatMessage(sender, message, isMe = false) {
         const messagesContainer = document.getElementById('chat-messages');
         const messageDiv = document.createElement('div');
-        messageDiv.className = 'chat-message';
+        messageDiv.className = `chat-message ${isMe ? 'own' : ''}`;
         
         // Sanitize message to prevent XSS
         const sanitizedMessage = this.sanitizeHTML(message);
@@ -679,6 +1420,11 @@ class AllOrNothingGame {
         messageDiv.innerHTML = `<span class="sender">${sanitizedSender}:</span> ${sanitizedMessage}`;
         messagesContainer.appendChild(messageDiv);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+    
+    addChatMessage(sender, message) {
+        // Legacy method - now handled by handleChatUpdate for Firebase messages
+        this.renderChatMessage(sender, message, sender === 'You');
     }
     
     sanitizeHTML(str) {
@@ -787,25 +1533,34 @@ class AllOrNothingGame {
     }
     
     // Game End Actions
-    playAgain() {
-        // Reset game
-        this.players.forEach(player => {
-            player.chips = { green: [], red: [], heart: [] };
-        });
-        
-        this.currentPlayerIndex = 0;
-        this.gameState = 'playing';
-        
-        // Reset UI
-        document.querySelectorAll('.player-area').forEach(area => {
-            area.classList.remove('active', 'winner');
-        });
-        
-        this.updatePlayerAreas();
-        this.showScreen('game-screen');
-        this.updateTurnIndicator();
-        this.enableRollButton();
-        this.playSound('background-music', true);
+    async playAgain() {
+        try {
+            // Reset game state in Firebase
+            if (this.roomId) {
+                await resetGameState(this.roomId);
+            }
+            
+            // Reset local state
+            this.players.forEach(player => {
+                player.chips = { green: [], red: [], heart: [] };
+            });
+            
+            this.currentPlayerIndex = 0;
+            this.gameState = 'playing';
+            
+            // Reset UI
+            document.querySelectorAll('.player-area').forEach(area => {
+                area.classList.remove('active', 'winner');
+            });
+            
+            this.updatePlayerAreas();
+            this.showScreen('game-screen');
+            this.disableRollButton(); // Will be enabled by state subscription
+            this.playSound('background-music', true);
+        } catch (err) {
+            console.error('Failed to restart game:', err);
+            this.showNotification('Could not restart game');
+        }
     }
     
     exitToMenu() {
